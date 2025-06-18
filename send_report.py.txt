@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+import glob           # to find latest report file
+import smtplib        # for SMTP email
+import os             # for environment vars
+from email.message import EmailMessage
+
+# Directory where checker.py writes CSVs
+REPORT_DIR = "reports/"
+
+# Read SMTP configuration from environment variables
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT   = int(os.getenv("SMTP_PORT", 587))
+USERNAME    = os.getenv("SMTP_USER")
+PASSWORD    = os.getenv("SMTP_PASS")
+TO_ADDR     = os.getenv("ALERT_RECIPIENT")
+
+def find_latest_report():
+    """Return the path to the most recent report CSV, or None if none exist."""
+    files = sorted(glob.glob(REPORT_DIR + "report_*.csv"))
+    return files[-1] if files else None
+
+def build_email(report_path):
+    """
+    Construct an EmailMessage object with the CSV attached.
+    """
+    msg = EmailMessage()
+    msg['Subject'] = "Daily Network Health Report"
+    msg['From']    = USERNAME
+    msg['To']      = TO_ADDR
+
+    # Read CSV content and attach it
+    with open(report_path, 'rb') as f:
+        data = f.read()
+    msg.set_content("Attached is the latest network health CSV report.")
+    msg.add_attachment(data,
+                       maintype='text',
+                       subtype='csv',
+                       filename=os.path.basename(report_path))
+    return msg
+
+def send_email():
+    """
+    Find the latest report and send it via SMTP.
+    If no report is found, simply exit.
+    """
+    rpt = find_latest_report()
+    if not rpt:
+        print("[!] No report found to send.")
+        return
+
+    msg = build_email(rpt)
+    # Connect to SMTP server over TLS
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as smtp:
+        smtp.starttls()
+        smtp.login(USERNAME, PASSWORD)
+        smtp.send_message(msg)
+
+    print(f"[+] Email sent to {TO_ADDR}")
+
+if __name__ == "__main__":
+    send_email()

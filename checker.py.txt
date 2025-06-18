@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+import yaml           # for loading YAML configuration
+import csv            # for writing CSV reports
+import datetime       # for timestamping
+import os             # for filesystem operations
+from ping3 import ping  # third‑party ping utility
+import socket         # for TCP port checks
+
+def load_targets(path="config/targets.yml"):
+    """
+    Load the list of hosts to check from a YAML file.
+    Returns a list of dicts: [{'name': ..., 'ip': ..., 'ports': [...]}, …]
+    """
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    return data.get('hosts', [])
+
+def test_ping(ip):
+    """
+    Ping the given IP. Returns latency in milliseconds (float),
+    or None if the host does not respond within timeout.
+    """
+    try:
+        latency = ping(ip, unit="ms", timeout=2)
+        return latency
+    except Exception:
+        return None
+
+def test_ports(ip, ports):
+    """
+    Attempt to open a TCP socket to each port.
+    Returns a dict mapping port -> True (open) or False (closed).
+    """
+    results = {}
+    for port in ports:
+        sock = socket.socket()
+        sock.settimeout(2)  # 2 second connect timeout
+        try:
+            sock.connect((ip, port))
+            results[port] = True
+        except Exception:
+            results[port] = False
+        finally:
+            sock.close()
+    return results
+
+def main():
+    # Load targets and prepare output directory
+    targets = load_targets()
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    os.makedirs("reports", exist_ok=True)
+
+    rows = []
+    # Iterate each target, ping and port-check it
+    for t in targets:
+        latency = test_ping(t['ip'])
+        ports = test_ports(t['ip'], t.get('ports', []))
+
+        # Build a single row for CSV output
+        row = {
+            'timestamp': timestamp,
+            'name': t['name'],
+            'ip': t['ip'],
+            # Format latency to one decimal place if present
+            'latency_ms': f"{latency:.1f}" if latency is not None else "",
+            # Add one column per port: port_22, port_443, etc.
+            **{f'port_{p}': ports.get(p) for p in t.get('ports', [])}
+        }
+        rows.append(row)
+
+    # Write out CSV file
+    out_path = f"reports/report_{timestamp}.csv"
+    with open(out_path, "w", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"[+] Report written to {out_path}")
+
+if __name__ == "__main__":
+    main()
